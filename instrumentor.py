@@ -1,25 +1,30 @@
-# código que recorre el AST e injecta el código al inicio de cada función.
 from ast import *
 import threading
 from multiprocessing.dummy import Array
 import os
 
 class Instrumentor(NodeTransformer):
-    
-    def __init__(self):
-        self.functions = dict()
-
-    def visit_Call(self, node: Call):
+    def visit_FunctionDef(self, node: FunctionDef):
         transformedNode = NodeTransformer.generic_visit(self, node)
-        func_name = transformedNode.func.id
+        injected_code = 'Profile.record(\''+ transformedNode.name+'\',['
+        i = 0
+        for arg in transformedNode.args.args:
+            if i == 0:
+                injected_code = injected_code + arg.arg
+            else:
+                injected_code = injected_code + ', '+ arg.arg
+            i = i + 1
+        injected_code = injected_code + '])'
         
-        if func_name not in self.functions:
-            self.functions[func_name] = []
-        for arg in transformedNode.args:
-            if isinstance(arg, Constant):
-                if arg.value not in self.functions[func_name]:
-                    self.functions[func_name].append(arg.value)
-
+        ast_to_inject = parse(injected_code)
+        
+        if isinstance(transformedNode.body, list):
+            transformedNode.body.insert(0, ast_to_inject.body[0])
+        else:
+            transformedNode.body = [ast_to_inject.body[0], node.body]
+        
+        fix_missing_locations(transformedNode)
+        
         return transformedNode
 
 
@@ -44,15 +49,21 @@ class Profile:
     
     # instance method
     def __init__(self):
-        self.functions_called=[]
-    def ins_record(self, cls, functionName, args):   
-        self.functions_called.append(functionName)
+        self.functions_called=dict()
+    def ins_record(self, cls, functionName, args):
+        if functionName not in self.functions_called:
+            self.functions_called[functionName] = []
+        first_arg = args[0]
+        if first_arg not in self.functions_called[functionName]:
+            self.functions_called[functionName].append(first_arg)
+
     def printReport(self):
-        print("-- Funciones Cacheables --")
+        print("-- executed methods --")
         for fun in self.functions_called:
-            print(fun)
+            if len(self.functions_called[fun]) == 1:
+                print(fun)
 
     
 def instrument(ast):
     visitor = Instrumentor()
-    return  fix_missing_locations(visitor.visit(ast)), visitor.functions
+    return  fix_missing_locations(visitor.visit(ast))
