@@ -1,1 +1,0 @@
-# código que recorre el AST e injecta el código al inicio de cada función.
